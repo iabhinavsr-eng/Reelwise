@@ -59,6 +59,12 @@ export class SupabaseAuthService implements AuthService {
     await getSupabase().auth.signOut();
   }
 
+  async getApiHeaders(): Promise<Record<string, string>> {
+    // getSession() refreshes an expired access token when needed.
+    const { data } = await getSupabase().auth.getSession();
+    return data.session ? { authorization: `Bearer ${data.session.access_token}` } : {};
+  }
+
   onAuthChange(listener: (user: AuthUser | null) => void) {
     const { data } = getSupabase().auth.onAuthStateChange((_event, session) => {
       listener(session ? toAuthUser(session.user) : null);

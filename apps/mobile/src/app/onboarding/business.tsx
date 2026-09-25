@@ -1,10 +1,13 @@
-import { Redirect, useLocalSearchParams } from 'expo-router';
+import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 
 import { ServicesEditor } from '@/components/onboarding/ServicesEditor';
 import { StepScreen } from '@/components/onboarding/StepScreen';
 import { Notice } from '@/components/ui/Notice';
+import { Text } from '@/components/ui/Text';
 import { TextField } from '@/components/ui/TextField';
+import { env } from '@/config/env';
+import { approve, businessDiffersFromSuggestion } from '@/domain/onboarding';
 import type { BusinessProfile } from '@/domain/types';
 import { displayHost } from '@/domain/validation';
 import { haptics } from '@/lib/haptics';
@@ -38,7 +41,7 @@ export default function BusinessScreen() {
     setErrors(next);
     if (next.name || next.industry) return haptics.error();
     const trimmed = { ...profile, name: profile.name.trim(), industry: profile.industry.trim() };
-    if (await submit.run(() => confirm({ business: trimmed }, 'audience'))) continueTo('audience', review);
+    if (await submit.run(() => confirm({ business: trimmed, approved: approve(draft, 'business') }, 'audience'))) continueTo('audience', review);
   }
 
   return (
@@ -51,7 +54,13 @@ export default function BusinessScreen() {
       ctaLoading={submit.loading}
       error={submit.error}
     >
-      <Notice>{`Drafted from ${displayHost(profile.websiteUrl)}`}</Notice>
+      {draft.approved?.business && businessDiffersFromSuggestion({ ...draft, business: profile }) ? (
+        <Notice icon="refresh" action={{ label: 'Use them', onPress: () => draft.analysis && setProfile(draft.analysis.business) }}>
+          {`We found updated details on ${displayHost(profile.websiteUrl)}. You’re seeing your saved version.`}
+        </Notice>
+      ) : (
+        <Notice>{draft.analysis?.details?.mode === 'manual' ? 'Drafted from your answers' : `Drafted from ${displayHost(profile.websiteUrl)}`}</Notice>
+      )}
       <TextField label="Business name" value={profile.name} onChangeText={set('name')} error={errors.name} autoCapitalize="words" />
       <TextField label="Industry" value={profile.industry} onChangeText={set('industry')} error={errors.industry} />
       <TextField
@@ -69,6 +78,17 @@ export default function BusinessScreen() {
         style={{ minHeight: 120 }}
       />
       <ServicesEditor services={profile.services} onChange={set('services')} />
+      {env.debugToolsEnabled && draft.analysis ? (
+        <Text
+          variant="caption"
+          tone="accent"
+          accessibilityRole="link"
+          onPress={() => router.push({ pathname: '/debug/analysis', params: { id: draft.analysis?.analysisId ?? 'local' } })}
+          style={{ paddingVertical: 12 }}
+        >
+          Developer: inspect this analysis →
+        </Text>
+      ) : null}
     </StepScreen>
   );
 }

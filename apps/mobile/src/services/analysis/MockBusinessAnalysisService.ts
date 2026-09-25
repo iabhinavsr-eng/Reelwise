@@ -1,40 +1,42 @@
-import { AppError } from '@/lib/errors';
 import { delay } from '@/lib/storage';
 import { fixtureFor, nameFromUrl } from '@/services/mock/industryFixtures';
-import { ANALYSIS_STAGES, AnalyzeOptions, BusinessAnalysis, BusinessAnalysisService } from './BusinessAnalysisService';
+import { ANALYSIS_STAGES, AnalysisFailure, AnalyzeOptions, BusinessAnalysis, BusinessAnalysisService } from './BusinessAnalysisService';
 
 /**
- * Development stand-in for real crawling + AI. Picks a realistic industry
- * fixture from keywords in the URL and paces the stages so the UI feels real.
+ * Demo-mode stand-in used when EXPO_PUBLIC_API_URL isn't set. Picks a
+ * realistic industry fixture from keywords in the URL.
  *
- * Tip: a URL containing "offline" simulates a network failure, so the
- * error/retry state can be exercised.
+ * Simulations for exercising failure UX:
+ *   URL contains "offline" → network failure
+ *   URL contains "thin"    → "couldn't learn enough" → manual fallback
  */
 export class MockBusinessAnalysisService implements BusinessAnalysisService {
   constructor(private readonly stageDurationMs = 900) {}
 
-  async analyzeWebsite(url: string, { onStageComplete, signal }: AnalyzeOptions = {}): Promise<BusinessAnalysis> {
+  async analyzeWebsite(url: string, { onStageComplete, signal, manual }: AnalyzeOptions = {}): Promise<BusinessAnalysis> {
     for (const stage of ANALYSIS_STAGES) {
       await delay(this.stageDurationMs, signal);
-      if (stage === 'reading' && url.includes('offline')) {
-        throw new AppError('We couldn’t reach that website. Check the address or your connection and try again.', 'network');
-      }
+      if (stage === 'reading' && !manual && url.includes('offline')) throw new AnalysisFailure('network');
+      if (stage === 'services' && !manual && url.includes('thin')) throw new AnalysisFailure('insufficient_content');
       onStageComplete?.(stage);
     }
 
-    const fixture = fixtureFor(url);
-    const name = nameFromUrl(url) || 'Your Business';
+    const fixture = fixtureFor(manual ? `${manual.whatYouDo} ${url}` : url);
+    const name = manual?.businessName.trim() || nameFromUrl(url) || 'Your Business';
     return {
       business: {
         name,
         websiteUrl: url,
         industry: fixture.industry,
         primaryLocation: fixture.primaryLocation,
-        description: fixture.description(name),
+        description: manual?.whatYouDo.trim() || fixture.description(name),
         services: [...fixture.services],
       },
-      audience: { summary: fixture.audienceSummary, structuredAttributes: fixture.audienceAttributes },
-      valueProposition: { summary: fixture.valueProposition(name) },
+      audience: {
+        summary: manual?.customers?.trim() || fixture.audienceSummary,
+        structuredAttributes: fixture.audienceAttributes,
+      },
+      valueProposition: { summary: manual?.differentiators?.trim() || fixture.valueProposition(name) },
       suggestedGoals: [...fixture.goals],
       suggestedVoiceTraits: [...fixture.voice],
       provider: 'mock',

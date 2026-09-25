@@ -59,6 +59,12 @@ export class LocalAuthService implements AuthService {
     await removeKey(SESSION_KEY);
   }
 
+  /** Demo mode only: identifies the local user to an API running with AUTH_MODE=dev. */
+  async getApiHeaders(): Promise<Record<string, string>> {
+    const userId = await readJson<string>(SESSION_KEY);
+    return userId ? { 'x-dev-user-id': userId } : {};
+  }
+
   onAuthChange() {
     return () => {};
   }

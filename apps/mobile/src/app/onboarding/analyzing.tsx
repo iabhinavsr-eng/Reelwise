@@ -8,44 +8,54 @@ import { Button } from '@/components/ui/Button';
 import { ErrorNotice } from '@/components/ui/Notice';
 import { PulseMark } from '@/components/ui/PulseMark';
 import { Text } from '@/components/ui/Text';
+import { applyAnalysis } from '@/domain/onboarding';
 import { displayHost } from '@/domain/validation';
 import { friendlyMessage } from '@/lib/errors';
 import { haptics } from '@/lib/haptics';
 import { stepHref } from '@/lib/onboardingNav';
 import { delay, isAbortError } from '@/lib/storage';
-import { AnalysisStage, BusinessAnalysis, businessAnalysisService } from '@/services/analysis';
+import { ANALYSIS_STAGES, AnalysisFailure, AnalysisStage, BusinessAnalysis, businessAnalysisService } from '@/services/analysis';
 import { useOnboarding } from '@/state/OnboardingProvider';
 import { colors, spacing } from '@/theme';
 
 type Phase = 'running' | 'saving' | 'done' | 'error';
 
+interface Failure {
+  message: string;
+  offerManual: boolean;
+  offerDifferentUrl: boolean;
+  couldNotLearn: boolean;
+}
+
+function describeFailure(e: unknown): Failure {
+  if (e instanceof AnalysisFailure) {
+    return {
+      message: e.message,
+      offerManual: e.offerManualFallback,
+      offerDifferentUrl: e.offerDifferentUrl,
+      couldNotLearn: e.offerManualFallback,
+    };
+  }
+  return { message: friendlyMessage(e, 'Something went wrong while learning about your business.'), offerManual: false, offerDifferentUrl: true, couldNotLearn: false };
+}
+
 export default function AnalyzingScreen() {
-  const { draft, confirm } = useOnboarding();
+  const { draft, confirm, saveLocal } = useOnboarding();
   const insets = useSafeAreaInsets();
   const url = draft.websiteUrl;
+  const manual = draft.manualInput;
   const [completed, setCompleted] = useState<AnalysisStage[]>([]);
   const [phase, setPhase] = useState<Phase>('running');
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<Failure | null>(null);
   const [attempt, setAttempt] = useState(0);
   const draftRef = useRef(draft);
   draftRef.current = draft;
 
   const save = useCallback(
     async (analysis: BusinessAnalysis) => {
-      const current = draftRef.current;
       setPhase('saving');
-      await confirm(
-        {
-          analysis,
-          business: analysis.business,
-          audience: analysis.audience,
-          valueProposition: analysis.valueProposition,
-          // Pre-select AI suggestions so the user confirms rather than creates.
-          goals: current.goals.length ? current.goals : analysis.suggestedGoals,
-          voiceTraits: current.voiceTraits.length ? current.voiceTraits : analysis.suggestedVoiceTraits,
-        },
-        'business',
-      );
+      // New analysis = new SUGGESTIONS. Anything the user already approved is kept.
+      await confirm(applyAnalysis(draftRef.current, analysis), 'business');
       setPhase('done');
       haptics.success();
       await delay(650); // let the final check land before moving on
@@ -57,35 +67,56 @@ export default function AnalyzingScreen() {
   useEffect(() => {
     if (!url) return;
     const controller = new AbortController();
-    setError(null);
+    setFailure(null);
     setCompleted([]);
     setPhase('running');
 
     (async () => {
       // Analysis finished but saving failed last time: just retry the save.
       const existing = draftRef.current.analysis;
-      if (existing && existing.business.websiteUrl === url) {
-        setCompleted(['reading', 'services', 'positioning', 'audience', 'value']);
+      const sameRequest = existing && existing.business.websiteUrl === url && !draftRef.current.manualInput;
+      if (sameRequest && attempt > 0) {
+        setCompleted([...ANALYSIS_STAGES]);
         return save(existing);
       }
       const analysis = await businessAnalysisService.analyzeWebsite(url, {
         signal: controller.signal,
-        onStageComplete: (stage) => setCompleted((prev) => [...prev, stage]),
+        manual: draftRef.current.manualInput,
+        resumeJobId: attempt === 0 ? draftRef.current.pendingAnalysisId : undefined,
+        onJobCreated: (jobId) => saveLocal({ pendingAnalysisId: jobId }),
+        onStageComplete: (stage) => setCompleted((prev) => (prev.includes(stage) ? prev : [...prev, stage])),
       });
       if (!controller.signal.aborted) await save(analysis);
     })().catch((e) => {
       if (isAbortError(e) || controller.signal.aborted) return;
       haptics.error();
+      saveLocal({ pendingAnalysisId: undefined });
       setPhase('error');
-      setError(friendlyMessage(e, 'We couldn’t read that website. Check the address and try again.'));
+      setFailure(describeFailure(e));
     });
 
     return () => controller.abort();
-  }, [url, attempt, save]);
+  }, [url, attempt, save, saveLocal]);
 
   if (!url) return <Redirect href={stepHref('website')} />;
 
-  const title = phase === 'error' ? 'We hit a snag.' : phase === 'done' ? 'Your profile is ready.' : 'Learning your business…';
+  const title =
+    phase === 'error'
+      ? failure?.couldNotLearn
+        ? 'We couldn’t learn enough from your website.'
+        : 'We hit a snag.'
+      : phase === 'done'
+        ? 'Your profile is ready.'
+        : 'Learning your business…';
+
+  const subtitle =
+    phase === 'error'
+      ? failure?.couldNotLearn
+        ? 'Answer four quick questions and we’ll build your profile from those instead.'
+        : 'Nothing you entered is lost.'
+      : manual
+        ? 'Give us a moment. We’re turning your answers into a starting profile.'
+        : `Give us a moment. We’re reading ${displayHost(url)} and preparing your starting profile.`;
 
   return (
     <View style={styles.container}>
@@ -95,17 +126,24 @@ export default function AnalyzingScreen() {
           {title}
         </Text>
         <Text variant="supporting" center style={styles.subtitle}>
-          {phase === 'error'
-            ? 'Nothing you entered is lost.'
-            : `Give us a moment. We’re reading ${displayHost(url)} and preparing your starting profile.`}
+          {subtitle}
         </Text>
-        <AnalysisChecklist completed={completed} running={phase === 'running'} />
+        {phase === 'error' ? null : <AnalysisChecklist completed={completed} running={phase === 'running'} />}
       </ScrollView>
-      {phase === 'error' ? (
+      {phase === 'error' && failure ? (
         <View style={[styles.bottom, { paddingBottom: Math.max(insets.bottom, spacing.lg) + 4 }]}>
-          <ErrorNotice message={error ?? 'Something went wrong.'} />
-          <Button title="Try again" onPress={() => setAttempt((n) => n + 1)} />
-          <Button title="Use a different website" variant="ghost" onPress={() => router.replace(stepHref('website'))} />
+          <ErrorNotice message={failure.message} />
+          {failure.offerManual ? (
+            <>
+              <Button title="Tell us about your business" onPress={() => router.replace('/onboarding/manual')} />
+              <Button title="Try again" variant="ghost" onPress={() => setAttempt((n) => n + 1)} />
+            </>
+          ) : (
+            <Button title="Try again" onPress={() => setAttempt((n) => n + 1)} />
+          )}
+          {failure.offerDifferentUrl ? (
+            <Button title="Use a different website" variant="ghost" onPress={() => router.replace(stepHref('website'))} />
+          ) : null}
         </View>
       ) : null}
     </View>

@@ -1,6 +1,8 @@
 import { OnboardingDraft, OnboardingStep, ONBOARDING_STEPS, emptyDraft } from '@/domain/onboarding';
 import type { ContentGoal, ContentIdea, ContentIdeaStatus, VoiceTrait } from '@/domain/types';
 import { getSupabase } from '@/lib/supabase';
+import { mapServerResult } from '@/services/analysis/mapServerResult';
+import type { ServerAnalysisResult } from '@/services/api/types';
 import type { ProfileRepository } from './ProfileRepository';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- row shapes come from PostgREST */
@@ -35,9 +37,8 @@ export class SupabaseProfileRepository implements ProfileRepository {
     const rows = check(
       await getSupabase()
         .from('businesses')
-        .select(
-          '*, audience_profiles(*), value_propositions(*), content_preferences(*), content_playbooks(*), business_analyses(result, analyzed_at)',
-        )
+        // business_analyses is loaded separately below: the tables reference each other both ways, so an embed would be ambiguous.
+        .select('*, audience_profiles(*), value_propositions(*), content_preferences(*), content_playbooks(*)')
         .eq('user_id', userId)
         .order('created_at', { ascending: true })
         .limit(1),
@@ -49,8 +50,13 @@ export class SupabaseProfileRepository implements ProfileRepository {
     const value = one<any>(b.value_propositions);
     const prefs = one<any>(b.content_preferences);
     const playbook = one<any>(b.content_playbooks);
-    const analyses = (Array.isArray(b.business_analyses) ? b.business_analyses : []) as any[];
-    const latest = analyses.sort((x, y) => String(y.analyzed_at).localeCompare(String(x.analyzed_at)))[0];
+    // The analysis the approved profile came from (suggestions for "Use suggestion").
+    let analysis: OnboardingDraft['analysis'];
+    if (b.current_analysis_id) {
+      const { data } = await getSupabase().from('business_analyses').select('result, status').eq('id', b.current_analysis_id).maybeSingle();
+      if (data?.status === 'completed' && data.result) analysis = mapServerResult(data.result as ServerAnalysisResult);
+    }
+    const approvedAt = (value: string | null | undefined) => value ?? undefined;
     const step = (ONBOARDING_STEPS as readonly string[]).includes(playbook?.onboarding_step)
       ? (playbook.onboarding_step as OnboardingStep)
       : 'business';
@@ -61,7 +67,12 @@ export class SupabaseProfileRepository implements ProfileRepository {
       completed: Boolean(playbook?.onboarding_completed),
       businessId: b.id,
       websiteUrl: b.website_url,
-      analysis: latest?.result ?? undefined,
+      analysis,
+      approved: {
+        business: approvedAt(b.profile_approved_at),
+        audience: approvedAt(audience?.approved_at),
+        valueProposition: approvedAt(value?.approved_at),
+      },
       business: {
         name: b.name,
         websiteUrl: b.website_url,
@@ -81,8 +92,23 @@ export class SupabaseProfileRepository implements ProfileRepository {
   async saveDraft(userId: string, draft: OnboardingDraft): Promise<OnboardingDraft> {
     // Nothing to store server-side until the analysis has produced a business.
     if (!draft.business) return draft;
+    // Only server analyses exist as rows; mock/demo analyses live on-device.
+    const analysisId = draft.analysis?.provider === 'api' ? draft.analysis.analysisId ?? null : null;
+    try {
+      return await this.write(userId, draft, analysisId);
+    } catch (e) {
+      // The analysis row may not exist in this database (e.g. an API running
+      // with its in-memory store). Save the approved profile without the link.
+      if (analysisId && (e as { code?: string })?.code === '23503') return this.write(userId, draft, null);
+      throw e;
+    }
+  }
+
+  private async write(userId: string, draft: OnboardingDraft, analysisId: string | null): Promise<OnboardingDraft> {
     const db = getSupabase();
-    const { business } = draft;
+    const business = draft.business!;
+    const analysis = draft.analysis;
+    const approved = draft.approved ?? {};
     const businessRow = {
       user_id: userId,
       name: business.name,
@@ -91,6 +117,8 @@ export class SupabaseProfileRepository implements ProfileRepository {
       description: business.description,
       primary_location: business.primaryLocation,
       services: business.services,
+      current_analysis_id: analysisId,
+      profile_approved_at: approved.business ?? null,
     };
 
     let businessId = draft.businessId;
@@ -101,6 +129,7 @@ export class SupabaseProfileRepository implements ProfileRepository {
       businessId = inserted.id;
     }
 
+    // APPROVED data. Suggestions live in business_analyses (written by the API only).
     const writes: PromiseLike<{ error: unknown }>[] = [
       db.from('content_playbooks').upsert({
         business_id: businessId,
@@ -114,36 +143,38 @@ export class SupabaseProfileRepository implements ProfileRepository {
         voice_traits: draft.voiceTraits,
       }),
     ];
-    if (draft.analysis) {
-      writes.push(
-        db.from('business_analyses').upsert(
-          {
-            business_id: businessId,
-            website_url: draft.analysis.business.websiteUrl,
-            provider: draft.analysis.provider,
-            result: draft.analysis,
-            analyzed_at: draft.analysis.analyzedAt,
-          },
-          { onConflict: 'business_id,analyzed_at', ignoreDuplicates: true },
-        ),
-      );
-    }
     if (draft.audience) {
+      const suggested = analysis?.audience.summary ?? null;
       writes.push(
         db.from('audience_profiles').upsert({
           business_id: businessId,
           summary: draft.audience.summary,
           structured_attributes: draft.audience.structuredAttributes,
-          ai_suggested_summary: draft.analysis?.audience.summary ?? null,
+          ai_suggested_summary: suggested,
+          source_analysis_id: analysisId,
+          user_edited: suggested !== null && suggested.trim() !== draft.audience.summary.trim(),
+          approved_at: approved.audience ?? null,
         }),
       );
     }
     if (draft.valueProposition) {
+      const suggested = analysis?.valueProposition.summary ?? null;
+      const details = analysis?.details?.valueProposition;
       writes.push(
         db.from('value_propositions').upsert({
           business_id: businessId,
           summary: draft.valueProposition.summary,
-          ai_suggested_summary: draft.analysis?.valueProposition.summary ?? null,
+          ai_suggested_summary: suggested,
+          structured: details
+            ? {
+                differentiators: details.differentiators.map((d) => d.value),
+                problems_solved: details.problemsSolved,
+                benefits: details.benefits,
+              }
+            : {},
+          source_analysis_id: analysisId,
+          user_edited: suggested !== null && suggested.trim() !== draft.valueProposition.summary.trim(),
+          approved_at: approved.valueProposition ?? null,
         }),
       );
     }

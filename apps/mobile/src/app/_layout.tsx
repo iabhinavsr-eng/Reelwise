@@ -16,6 +16,7 @@ export default function RootLayout() {
             <Stack.Screen name="(auth)" options={{ animation: 'fade' }} />
             <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
             <Stack.Screen name="(app)" options={{ animation: 'fade' }} />
+            <Stack.Screen name="debug/analysis" options={{ presentation: 'modal' }} />
           </Stack>
         </OnboardingProvider>
       </AuthProvider>

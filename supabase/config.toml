@@ -15,6 +15,3 @@ site_url = "reelwise://"
 # Email confirmation off locally so sign-up lands straight in onboarding.
 [auth.email]
 enable_confirmations = false
-
-[functions.analyze-business]
-verify_jwt = true

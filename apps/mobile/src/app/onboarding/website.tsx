@@ -28,7 +28,13 @@ export default function WebsiteScreen() {
       router.push(stepHref('business'));
       return;
     }
-    saveLocal({ websiteUrl: normalized, analysis: undefined, step: furthestStep(draft.step, 'analyzing') });
+    saveLocal({
+      websiteUrl: normalized,
+      analysis: undefined,
+      pendingAnalysisId: undefined,
+      manualInput: undefined,
+      step: furthestStep(draft.step, 'analyzing'),
+    });
     router.push(stepHref('analyzing'));
   }
 

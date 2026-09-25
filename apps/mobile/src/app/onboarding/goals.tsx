@@ -1,5 +1,6 @@
 import { MultiSelectStep } from '@/components/onboarding/MultiSelectStep';
 import { GOAL_LABELS } from '@/domain/labels';
+import { approve } from '@/domain/onboarding';
 import { CONTENT_GOALS } from '@/domain/types';
 import { useOnboarding } from '@/state/OnboardingProvider';
 
@@ -16,7 +17,7 @@ export default function GoalsScreen() {
       suggested={draft.analysis?.suggestedGoals}
       next="voice"
       onAutosave={(goals) => saveLocal({ goals })}
-      onConfirm={(goals) => confirm({ goals }, 'voice')}
+      onConfirm={(goals) => confirm({ goals, approved: approve(draft, 'goals') }, 'voice')}
     />
   );
 }

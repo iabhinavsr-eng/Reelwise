@@ -22,6 +22,8 @@ export interface AuthService {
   signUp(input: SignUpInput): Promise<SignUpResult>;
   signIn(email: string, password: string): Promise<AuthUser>;
   signOut(): Promise<void>;
+  /** Credentials for calls to the Reelwise API (a Supabase access token, or a dev id in demo mode). */
+  getApiHeaders(): Promise<Record<string, string>>;
   /** Fires when the session changes outside our own calls (token expiry, etc). */
   onAuthChange(listener: (user: AuthUser | null) => void): () => void;
 }

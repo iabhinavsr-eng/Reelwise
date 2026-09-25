@@ -3,6 +3,7 @@ import { useState } from 'react';
 
 import { StepScreen } from '@/components/onboarding/StepScreen';
 import { SuggestionEditor } from '@/components/onboarding/SuggestionEditor';
+import { approve } from '@/domain/onboarding';
 import { haptics } from '@/lib/haptics';
 import { continueTo, stepHref } from '@/lib/onboardingNav';
 import { useAutosave } from '@/lib/useAutosave';
@@ -26,7 +27,7 @@ export default function ValueScreen() {
       haptics.error();
       return setError('Tell us what makes you different — one or two sentences.');
     }
-    if (await submit.run(() => confirm({ valueProposition: { summary: summary.trim() } }, 'goals'))) {
+    if (await submit.run(() => confirm({ valueProposition: { summary: summary.trim() }, approved: approve(draft, 'valueProposition') }, 'goals'))) {
       continueTo('goals', review);
     }
   }

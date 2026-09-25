@@ -1,5 +1,6 @@
 import { MultiSelectStep } from '@/components/onboarding/MultiSelectStep';
 import { VOICE_LABELS } from '@/domain/labels';
+import { approve } from '@/domain/onboarding';
 import { VOICE_TRAITS } from '@/domain/types';
 import { useOnboarding } from '@/state/OnboardingProvider';
 
@@ -16,7 +17,7 @@ export default function VoiceScreen() {
       suggested={draft.analysis?.suggestedVoiceTraits}
       next="playbook"
       onAutosave={(voiceTraits) => saveLocal({ voiceTraits })}
-      onConfirm={(voiceTraits) => confirm({ voiceTraits }, 'playbook')}
+      onConfirm={(voiceTraits) => confirm({ voiceTraits, approved: approve(draft, 'voiceTraits') }, 'playbook')}
     />
   );
 }

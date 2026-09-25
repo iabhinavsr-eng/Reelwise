@@ -3,6 +3,7 @@ import { useState } from 'react';
 
 import { StepScreen } from '@/components/onboarding/StepScreen';
 import { SuggestionEditor } from '@/components/onboarding/SuggestionEditor';
+import { approve } from '@/domain/onboarding';
 import { haptics } from '@/lib/haptics';
 import { continueTo, stepHref } from '@/lib/onboardingNav';
 import { useAutosave } from '@/lib/useAutosave';
@@ -28,7 +29,7 @@ export default function AudienceScreen() {
       return setError('Describe who you want to reach — a sentence is plenty.');
     }
     const audience = { summary: summary.trim(), structuredAttributes };
-    if (await submit.run(() => confirm({ audience }, 'value'))) continueTo('value', review);
+    if (await submit.run(() => confirm({ audience, approved: approve(draft, 'audience') }, 'value'))) continueTo('value', review);
   }
 
   return (

@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PlaybookSummary } from '@/components/PlaybookSummary';
 import { Button } from '@/components/ui/Button';
 import { Text } from '@/components/ui/Text';
+import { env } from '@/config/env';
 import { playbookFromDraft } from '@/domain/onboarding';
 import { useAuth } from '@/state/AuthProvider';
 import { useOnboarding } from '@/state/OnboardingProvider';
@@ -32,6 +33,13 @@ export default function ProfileScreen() {
         {playbook ? <PlaybookSummary playbook={playbook} /> : null}
         <View style={styles.actions}>
           <Button title="Done" onPress={() => router.back()} />
+          {env.debugToolsEnabled && draft.analysis ? (
+            <Button
+              title="Developer: analysis debug"
+              variant="ghost"
+              onPress={() => router.push({ pathname: '/debug/analysis', params: { id: draft.analysis?.analysisId ?? 'local' } })}
+            />
+          ) : null}
           <Button
             title="Sign out"
             variant="ghost"
