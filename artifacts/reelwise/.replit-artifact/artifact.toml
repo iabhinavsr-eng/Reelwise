@@ -1,0 +1,19 @@
+kind = "design-system"
+previewPath = "/reelwise/"
+title = "Reelwise Design System"
+description = "A reusable visual system for Reelwise, a mobile teleprompter and video-recording app that helps creators read scripts naturally and prepare social videos."
+version = "1.0.0"
+id = "artifacts/reelwise"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/reelwise/" ]
+localPort = 23107
+
+[services.development]
+run = "pnpm --filter @workspace/reelwise run dev"
+
+[services.env]
+PORT = "23107"
+BASE_PATH = "/reelwise/"
